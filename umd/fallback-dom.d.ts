@@ -78,6 +78,7 @@ declare abstract class ParentNode extends Node {
     querySelector<E extends Element = Element>(selectors: string): E | null;
     querySelectorAll<E extends Element = Element>(selectors: string): ArrayLike<E> & Iterable<E>;
     replaceChildren(...nodes: (Node | string)[]): void;
+    replaceChild<N extends Node>(newChild: Node, oldChild: N): N;
     insertBefore<N extends Node>(a: N, child: Node | null): N;
     appendChild<T extends Node>(a: T): T;
     removeChild<T extends Node>(a: T): T;

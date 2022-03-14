@@ -461,6 +461,11 @@ abstract class ParentNode extends Node {
         }
     }
 
+    public replaceChild<N extends Node>(newChild: Node, oldChild: N): N {
+        this.insertBefore(newChild, oldChild);
+        return this.removeChild(oldChild);
+    }
+
     public insertBefore<N extends Node>(a: N, child: Node | null): N {
         if (a.ownerDocument != this.ownerDocument) {
             const nt = this.nodeType;
@@ -474,6 +479,15 @@ abstract class ParentNode extends Node {
                 } else {
                     throw new Error("owner document mismatch while inserting to the root");
                 }
+            }
+        }
+        {
+            let par = this as Node | null;
+            while (par && par != a) {
+                par = par.parentNode;
+            }
+            if (par) {
+                throw new Error("node insertion would lead to circularity");
             }
         }
         if (a.parentNode == this) {
