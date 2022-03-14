@@ -15,6 +15,26 @@ declare class CustomElementRegistry {
     get(name: string): (new () => Element) | undefined;
     [symDefinedTag](cons: Function): string | undefined;
 }
+declare class DOMTokenList {
+    private readonly _split;
+    private readonly _accessor;
+    private readonly _setter;
+    private readonly _d;
+    private readonly _comb;
+    private _lastRead?;
+    constructor(split: RegExp, combiner: string, accessor: () => string | null | undefined, setter: (v: string) => any);
+    private _upd;
+    get length(): number;
+    get value(): string;
+    set value(val: string);
+    toString(): string;
+    add(...tokens: string[]): void;
+    contains(token: string): boolean;
+    remove(...tokens: string[]): void;
+    replace(token: string, newToken: string): boolean;
+    toggle(token: string, force?: boolean): boolean;
+    forEach(f: (value: string, key: number, parent: DOMTokenList) => void, thisArg?: any): void;
+}
 declare const symParent: unique symbol;
 declare const symPreviousSibling: unique symbol;
 declare const symNextSibling: unique symbol;
@@ -113,14 +133,17 @@ declare abstract class Attr extends Node {
     get localName(): string;
 }
 declare const symAttributes: unique symbol;
+declare const symClassList: unique symbol;
 export declare abstract class Element extends ParentNode {
     readonly [symTagName]: string;
     [symAttributes]?: Map<string, string>;
+    [symClassList]?: DOMTokenList;
     get nodeType(): 1;
     get tagName(): string;
     get localName(): string;
     get id(): string;
     set id(id: string);
+    get classList(): DOMTokenList;
     get attributes(): ArrayLike<Attr> & Iterable<Attr>;
     protected constructor();
     getAttribute(att: string): string | null;

@@ -93,6 +93,122 @@ class CustomElementRegistry {
     }
 }
 
+class DOMTokenList {
+    private readonly _split: RegExp;
+    private readonly _accessor: () => string | null | undefined;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private readonly _setter: (v: string) => any;
+    private readonly _d = new Set<string>();
+    private readonly _comb: string;
+    private _lastRead?: string | null;
+    
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    public constructor(split: RegExp, combiner: string, accessor: () => string | null | undefined, setter: (v: string) => any) {
+        this._split = split;
+        this._accessor = accessor;
+        this._setter = setter;
+        this._comb = combiner;
+    }
+
+    private _upd() {
+        const r = this._accessor();
+        const d = this._d;
+        if (r == this._lastRead) {
+            return d;
+        }
+        this._lastRead = r;
+        d.clear();
+        if (!r) {
+            return d;
+        }
+        for (const c of r.split(this._split)) {
+            c && d.add(c);
+        }
+        return d;
+    }
+
+    public get length() {
+        const d = this._upd();
+        return d.size;
+    }
+
+    public get value() {
+        this._upd();
+        return this._lastRead || "";
+    }
+    public set value(val: string) {
+        this._upd();
+        this._setter(val || "");
+    }
+    public toString() {
+        this._upd();
+        return this._lastRead || "";
+    }
+    public add(...tokens: string[]) {
+        const d = this._upd();
+        const s = this._split;
+        for (const t of tokens) {
+            if (!t) {
+                continue;
+            }
+            if (s.test(t)) {
+                throw new Error("invalid token");
+            }
+            d.add(t);
+        }
+        this._setter(Array.from(d).join(this._comb));
+    }
+    public contains(token: string): boolean {
+        const d = this._upd();
+        return d.has(token);
+    }
+    public remove(...tokens: string[]) {
+        const d = this._upd();
+        const s = this._split;
+        for (const t of tokens) {
+            if (!t) {
+                continue;
+            }
+            if (s.test(t)) {
+                throw new Error("invalid token");
+            }
+            d.delete(t);
+        }
+        this._setter(Array.from(d).join(this._comb));
+    }
+    public replace(token: string, newToken: string): boolean {
+        const d = this._upd();
+        if (!d.delete(token)) {
+            return false;
+        }
+        if (this._split.test(newToken)) {
+            throw new Error("invalid token");
+        }
+        d.add(newToken);
+        this._setter(Array.from(d).join(this._comb));
+        return true;
+    }
+    public toggle(token: string, force?: boolean): boolean {
+        const d = this._upd();
+        if (!force) {
+            if (d.delete(token) || force === false) {
+                return false;
+            }
+        }
+        if (this._split.test(token)) {
+            throw new Error("invalid token");
+        }
+        d.add(token);
+        this._setter(Array.from(d).join(this._comb));
+        return true;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    public forEach(f: (value: string, key: number, parent: DOMTokenList) => void, thisArg?: any): void {
+        const d = this._upd();
+        d.forEach((v) => f.call(thisArg, v, -1, this));
+    }
+}
+
 const symParent = Symbol("parent");
 const symPreviousSibling = Symbol("previousSibling");
 const symNextSibling = Symbol("nextSibling");
@@ -575,9 +691,11 @@ abstract class Attr extends Node {
 }
 
 const symAttributes = Symbol("attributes");
+const symClassList = Symbol("classList");
 export abstract class Element extends ParentNode {
     readonly [symTagName]!: string;
     [symAttributes]?: Map<string, string>;
+    [symClassList]?: DOMTokenList;
 
     public get nodeType(): 1 {
         return 1;
@@ -594,6 +712,15 @@ export abstract class Element extends ParentNode {
     }
     public set id(id: string) {
         this.setAttribute("id", id);
+    }
+
+    public get classList() {
+        let cl = this[symClassList];
+        if (!cl) {
+            cl = new DOMTokenList(/\s+/g, " ", () => this.getAttribute("class"), (v) => this.setAttribute("class", v));
+            this[symClassList] = cl;
+        }
+        return cl;
     }
 
     public get attributes(): ArrayLike<Attr> & Iterable<Attr> {
