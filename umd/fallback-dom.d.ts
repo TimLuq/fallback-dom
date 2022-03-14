@@ -30,6 +30,7 @@ export declare abstract class Node {
     get nextSibling(): Node | null;
     get ownerDocument(): Document | null;
     protected constructor();
+    cloneNode(deep?: boolean): Node;
     protected unsafeSetParent(parentNode: ParentNode | null): void;
     protected unsafeReplaceParent(parentNode: ParentNode | null): void;
     protected unsafeSetPrev(previousSibling: Node | null): void;

@@ -14,18 +14,29 @@ ele.className = "test example";
 ele.textContent = "span-content";
 ele.appendChild(doc.createComment(" comment-content "));
 
-assert(() => ele.firstChild.nodeType == 3);
-assert(() => ele.firstChild.data == "span-content");
-assert(() => ele.firstChild.textContent == "span-content");
+const checkIt = (e) => {
 
-assert(() => ele.lastChild.nodeType == 8);
-assert(() => ele.lastChild.data == " comment-content ");
-assert(() => ele.lastChild.textContent == " comment-content ");
+    assert(() => e.firstChild.nodeType == 3);
+    assert(() => e.firstChild.data == "span-content");
+    assert(() => e.firstChild.textContent == "span-content");
 
-assert(() => ele.textContent == "span-content");
-assert(() => ele.firstChild.previousSibling === null);
-assert(() => ele.firstChild.nextSibling === ele.lastChild);
-assert(() => ele.lastChild.previousSibling === ele.firstChild);
-assert(() => ele.lastChild.nextSibling === null);
+    assert(() => e.lastChild.nodeType == 8);
+    assert(() => e.lastChild.data == " comment-content ");
+    assert(() => e.lastChild.textContent == " comment-content ");
 
-console.log(serializeToString(doc));
+    assert(() => e.textContent == "span-content");
+    assert(() => e.firstChild.previousSibling === null);
+    assert(() => e.firstChild.nextSibling === e.lastChild);
+    assert(() => e.lastChild.previousSibling === e.firstChild);
+    assert(() => e.lastChild.nextSibling === null);
+
+    assert(() => e.lastChild.parentNode === e);
+};
+
+checkIt(ele);
+checkIt(ele.cloneNode(true));
+
+const frag = doc.createDocumentFragment();
+const cloned = Array.from(doc.childNodes).map((x) => x.cloneNode(true));
+frag.append(...cloned);
+console.log(serializeToString(frag));

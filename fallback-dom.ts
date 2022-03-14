@@ -124,6 +124,61 @@ export abstract class Node {
         }
     }
 
+    public cloneNode(deep = false): Node {
+        const base: Node = this.nodeType == 9 && this.constructor != this.ownerDocument?.Element
+            ? new (this.constructor as new() => Element)()
+            : Object.create(Object.getPrototypeOf(this), {
+                [symDocument]: { value: this[symDocument], writable: true },
+                [symParent]: { value: null, writable: true },
+                [symPreviousSibling]: { value: null, writable: true },
+                [symNextSibling]: { value: null, writable: true },
+            });
+        
+        {
+            const tcont = (this as Node as Text)[symTextContent];
+            if (typeof tcont != "undefined") {
+                Object.defineProperty(base, symTextContent, { value: tcont, writable: true });
+            }
+        }
+        {
+            const tatt = (this as Node as Element)[symAttributes];
+            if (typeof tatt != "undefined") {
+                Object.defineProperty(base, symAttributes, { value: new Map<string, string>(tatt), writable: true });
+            }
+        }
+        {
+            const tatt = (this as Node as Element)[symTagName];
+            if (!(base as Element)[symTagName] && typeof tatt != "undefined") {
+                Object.defineProperty(base, symTagName, { value: tatt, writable: true });
+            }
+        }
+        {
+            const tatt = (this as Node as ProcessingInstruction)[symTarget];
+            if (!(base as ProcessingInstruction)[symTarget] && typeof tatt != "undefined") {
+                Object.defineProperty(base, symTarget, { value: tatt, writable: false });
+            }
+        }
+        if (this.nodeType == 10) {
+            const t = this as Node as DocumentType;
+            Object.defineProperties(base, {
+                name: { value: t.name, writable: false },
+                publicId: { value: t.publicId, writable: false },
+                systemId: { value: t.systemId, writable: false },
+            });
+        }
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (!deep || !(this as any)[symChildNodes]) {
+            return base;
+        }
+        const t = this as Node as ParentNode;
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        for (const c of t[symChildNodes]!) {
+            (base as ParentNode).insertBefore(c.cloneNode(true), null);
+        }
+        return base;
+    }
+
     protected unsafeSetParent(parentNode: ParentNode | null) {
         this[symParent] = parentNode;
     }
@@ -292,7 +347,8 @@ abstract class ParentNode extends Node {
 
     public insertBefore<N extends Node>(a: N, child: Node | null): N {
         if (a.ownerDocument != this.ownerDocument) {
-            if (this.nodeType != 9) {
+            const nt = this.nodeType;
+            if (nt != 9 && nt != 11) {
                 throw new Error("owner document mismatch");
             }
             if (a.ownerDocument != (this as unknown as Document)) {
@@ -775,5 +831,8 @@ export function createDocumentType(qualifiedNameStr: string, publicId = "", syst
         name: { value: qualifiedNameStr, writable: false },
         publicId: { value: publicId, writable: false },
         systemId: { value: systemId, writable: false },
+        [symParent]: { value: null, writable: true },
+        [symPreviousSibling]: { value: null, writable: true },
+        [symNextSibling]: { value: null, writable: true },
     });
 }

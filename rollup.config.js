@@ -2,6 +2,7 @@ import { terser } from "rollup-plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 import summary from "rollup-plugin-summary";
 
+/** @type {import("rollup-plugin-terser").Options} */
 const terserOptions = {
     warnings: true,
     ecma: 2020,
@@ -13,6 +14,8 @@ const terserOptions = {
         comments: false,
         inline_script: false,
     },
+    keep_classnames: true,
+    module: true,
 };
 
 /** @type {import("rollup").RollupOptions[]} */
