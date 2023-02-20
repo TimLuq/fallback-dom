@@ -971,6 +971,7 @@ export abstract class Element extends ParentNode {
             for (const [k, [v, pfx]] of al) {
                 const attr = Object.create(Attr.prototype, {
                     [symDocument]: { value: this.ownerDocument, writable: false, enumerable: false },
+                    [symParent]: { value: this, writable: false, enumerable: false },
                     namespaceURI: { value: ns, writable: false, enumerable: true },
                     ownerElement: { value: this, writable: false, enumerable: true },
                     localName: { value: k, writable: false, enumerable: true },

@@ -15,7 +15,7 @@ function appendToString(node: Node, s: string): string {
                 s += ` xmlns:${el.prefix}="${el.namespaceURI || ""}"`;
             }
         } else if (el.namespaceURI) {
-            const parns = el.getAttributeNS(null, "xmlns") ?? el.parentNode?.lookupNamespaceURI(null);
+            const parns = el.getAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns") ?? el.getAttributeNS(null, "xmlns") ?? el.parentNode?.lookupNamespaceURI(null);
             if (parns !== el.namespaceURI) {
                 s += ` xmlns="${el.namespaceURI}"`;
             }
