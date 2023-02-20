@@ -42,6 +42,7 @@ declare const symPreviousSibling: unique symbol;
 declare const symNextSibling: unique symbol;
 export declare abstract class Node {
     abstract readonly nodeType: number;
+    abstract readonly nodeName: string;
     abstract readonly textContent: string;
     protected readonly [symDocument]: Document | null;
     protected [symParent]: ParentNode | null;
@@ -117,12 +118,14 @@ export declare abstract class CharacterData extends Node {
 }
 export declare class Text extends CharacterData {
     get nodeType(): 3;
+    get nodeName(): string;
     get textContent(): string;
     set textContent(content: string);
     protected constructor(text: string);
 }
 export declare class CDATASection extends CharacterData {
     get nodeType(): 4;
+    get nodeName(): string;
     get textContent(): string;
     set textContent(content: string);
     protected constructor(text: string);
@@ -131,6 +134,7 @@ declare const symTarget: unique symbol;
 export declare class ProcessingInstruction extends CharacterData {
     private [symTarget];
     get nodeType(): 7;
+    get nodeName(): string;
     get target(): string;
     get textContent(): string;
     set textContent(content: string);
@@ -138,12 +142,14 @@ export declare class ProcessingInstruction extends CharacterData {
 }
 export declare class Comment extends CharacterData {
     get nodeType(): 8;
+    get nodeName(): string;
     get textContent(): string;
     set textContent(content: string);
     protected constructor(text: string);
 }
 export declare class DocumentFragment extends ParentNode {
     get nodeType(): 11;
+    get nodeName(): string;
     protected constructor();
 }
 declare abstract class Attr extends Node {
@@ -154,6 +160,8 @@ declare abstract class Attr extends Node {
     readonly value: string;
     get specified(): boolean;
     get name(): string;
+    get nodeType(): number;
+    get nodeName(): string;
 }
 declare const symAttributes: unique symbol;
 declare const symClassList: unique symbol;
@@ -166,6 +174,7 @@ export declare abstract class Element extends ParentNode {
     private readonly [symIsCustomElement]?;
     private readonly [symCustomElementState]?;
     get nodeType(): 1;
+    get nodeName(): string;
     get tagName(): string;
     get localName(): string;
     get prefix(): string | null;
@@ -196,6 +205,7 @@ export declare abstract class Document extends ParentNode {
     get isConnected(): boolean;
     get customElements(): CustomElementRegistry;
     get nodeType(): 9;
+    get nodeName(): string;
     get documentElement(): Element | null;
     protected constructor();
     createElement(tagName: string): Element;
@@ -211,6 +221,7 @@ export declare function createDocument(): Document;
 export declare function createHTMLDocument(docTitle?: string): Document;
 export declare class DocumentType extends Node {
     get nodeType(): 10;
+    get nodeName(): string;
     get internalSubset(): null | string;
     set textContent(content: string);
     get textContent(): string;

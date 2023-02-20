@@ -258,6 +258,7 @@ const symPreviousSibling = Symbol("previousSibling");
 const symNextSibling = Symbol("nextSibling");
 export abstract class Node {
     public abstract readonly nodeType: number;
+    public abstract readonly nodeName: string;
     public abstract readonly textContent: string;
 
     protected readonly [symDocument]!: Document | null;
@@ -776,8 +777,12 @@ export abstract class CharacterData extends Node {
     }
 }
 export class Text extends CharacterData {
-    get nodeType(): 3 {
+    public get nodeType(): 3 {
         return 3;
+    }
+
+    public get nodeName() {
+        return "#text";
     }
 
     public get textContent() {
@@ -793,8 +798,12 @@ export class Text extends CharacterData {
 }
 
 export class CDATASection extends CharacterData {
-    get nodeType(): 4 {
+    public get nodeType(): 4 {
         return 4;
+    }
+    
+    public get nodeName() {
+        return "#cdata-section";
     }
 
     public get textContent() {
@@ -812,8 +821,13 @@ export class CDATASection extends CharacterData {
 const symTarget = Symbol("target");
 export class ProcessingInstruction extends CharacterData {
     private [symTarget]: string;
-    get nodeType(): 7 {
+
+    public get nodeType(): 7 {
         return 7;
+    }
+    
+    public get nodeName() {
+        return this[symTarget];
     }
 
     public get target(): string {
@@ -833,8 +847,12 @@ export class ProcessingInstruction extends CharacterData {
 }
 
 export class Comment extends CharacterData {
-    get nodeType(): 8 {
+    public get nodeType(): 8 {
         return 8;
+    }
+    
+    public get nodeName() {
+        return "#comment";
     }
 
     public get textContent() {
@@ -852,6 +870,9 @@ export class Comment extends CharacterData {
 export class DocumentFragment extends ParentNode {
     public get nodeType(): 11 {
         return 11;
+    }
+    public get nodeName() {
+        return "#document-fragment";
     }
     protected constructor() {
         super();
@@ -873,6 +894,12 @@ abstract class Attr extends Node {
         }
         return `${this.prefix}:${this.localName}`;
     }
+    public get nodeType() {
+        return 2;
+    }
+    public get nodeName() {
+        return this.name;
+    }
 }
 
 const symAttributes = Symbol("attributes");
@@ -888,6 +915,9 @@ export abstract class Element extends ParentNode {
 
     public get nodeType(): 1 {
         return 1;
+    }
+    public get nodeName() {
+        return this.tagName;
     }
     public get tagName() {
         if (!this[symPrefix]) {
@@ -1112,6 +1142,9 @@ export abstract class Document extends ParentNode {
     public get nodeType(): 9 {
         return 9;
     }
+    public get nodeName() {
+        return "#document";
+    }
 
     public get documentElement() {
         return this.firstElementChild;
@@ -1263,6 +1296,9 @@ export class DocumentType extends Node {
     public get nodeType(): 10 {
         return 10;
     }
+    public get nodeName() {
+        return this.name;
+    }
     public get internalSubset(): null | string {
         return null;
     }
@@ -1271,9 +1307,9 @@ export class DocumentType extends Node {
     public get textContent(): string {
         return null as unknown as string;
     }
-    readonly name: string;
-    readonly publicId: string;
-    readonly systemId: string;
+    public readonly name: string;
+    public readonly publicId: string;
+    public readonly systemId: string;
 
     private constructor() {
         super();
