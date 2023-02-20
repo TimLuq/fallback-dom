@@ -1,23 +1,60 @@
 import { querySel } from "./query-selector.js";
 
-const symDefinedTag = Symbol("definedTag");
 const symCustomElements = Symbol("customElements");
 const symDocument = Symbol("document");
-const symTagName = Symbol("tagName");
 
 const symRegReg = Symbol("reg");
 const symRegCon = Symbol("con");
 const symRegWhen = Symbol("when");
+
+const symLocalName = Symbol("localName");
+const symPrefix = Symbol("prefix");
+const symNsUri = Symbol("namespaceURI");
+const symIsCustomElement = Symbol("isCustomElement");
+const symCustomElementState = Symbol("customElementState");
+
+function signalConnected(el: Element) {
+    const state = el[symCustomElementState];
+    if (!state) {
+        return false;
+    }
+    {
+        const [con, dis, prev] = state;
+        if (prev || (!con && !dis)) {
+            return prev;
+        }
+    }
+    el[symCustomElementState][2] = true;
+    Promise.resolve().then(() => {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        const state = el[symCustomElementState]!;
+        const [con, dis] = state;
+        state[0] = false;
+        state[1] = false;
+        state[2] = false;
+        if (dis) {
+            const f = el.disconnectedCallback;
+            f && f.call(el);
+        }
+        if (con) {
+            const f = el.connectedCallback;
+            f && f.call(el);
+        }
+    });
+    return true;
+}
+
 class CustomElementRegistry {
-    readonly [symRegReg] = new Map<string, new() => Element>();
+    private readonly [symRegReg] = new Map<string, new() => Element>();
     // eslint-disable-next-line @typescript-eslint/ban-types
-    readonly [symRegCon] = new Map<Function, string>();
-    readonly [symRegWhen] = new Map<string, ((a: new() => Element) => void)[]>();
+    private readonly [symRegCon] = new Map<Function, string>();
+    private readonly [symRegWhen] = new Map<string, ((a: new() => Element) => void)[]>();
 
     public define(name: string, constructor: new() => Element) {
+        name = String(name);
         const reg = this[symRegReg];
         if (reg.has(name)) {
-            throw new Error("element " + JSON.stringify(name) + " has already been defined");
+            throw new Error("an element with the name " + JSON.stringify(name) + " has already been defined");
         }
         const proto = constructor.prototype;
         let e = proto;
@@ -29,15 +66,24 @@ class CustomElementRegistry {
             break;
         }
         if (!e) {
-            throw new Error("the constructor of element " + JSON.stringify(name) + " is not a decendant of the right kind of Element class");
+            throw new Error("the constructor of element " + JSON.stringify(name) + " is not a descendant of the right kind of Element class");
         }
         const con = this[symRegCon];
         if (Element == constructor || con.has(constructor)) {
             throw new Error("the prototype of element " + JSON.stringify(name) + " must be unique");
         }
+        if (proto[symIsCustomElement]) {
+            throw new Error("the prototype of element " + JSON.stringify(name) + " has already been registered in another registry");
+        }
         reg.set(name, constructor);
         con.set(constructor, name);
-        proto[symTagName] = name;
+
+        Object.defineProperties(proto, {
+            [symLocalName]: { value: name, configurable: false, writable: false, enumerable: false },
+            [symPrefix]: { value: null, configurable: false, writable: false, enumerable: false },
+            [symNsUri]: { value: null, configurable: false, writable: false, enumerable: false },
+            [symIsCustomElement]: { value: true, configurable: false, writable: false, enumerable: false },
+        });
 
         const when = this[symRegWhen].get(name);
         if (when) {
@@ -62,6 +108,10 @@ class CustomElementRegistry {
         try {
             Object.setPrototypeOf(root, cls.prototype);
             cls.call(root);
+            if (root.isConnected && root.connectedCallback && root[symCustomElementState] && !root[symCustomElementState][2]) {
+                root[symCustomElementState][0] = true;
+                signalConnected(root);
+            }
         } catch (e) {
             Object.setPrototypeOf(root, prev);
             throw e;
@@ -84,12 +134,6 @@ class CustomElementRegistry {
 
     public get(name: string): (new() => Element) | undefined {
         return this[symRegReg].get(name);
-    }
-    
-
-    // eslint-disable-next-line @typescript-eslint/ban-types
-    public [symDefinedTag](cons: Function): string | undefined {
-        return this[symRegCon].get(cons);
     }
 }
 
@@ -216,10 +260,10 @@ export abstract class Node {
     public abstract readonly nodeType: number;
     public abstract readonly textContent: string;
 
-    readonly [symDocument]: Document | null;
-    [symParent]: ParentNode | null = null;
-    [symPreviousSibling]: Node | null = null;
-    [symNextSibling]: Node | null = null;
+    protected readonly [symDocument]!: Document | null;
+    protected [symParent]: ParentNode | null = null;
+    protected [symPreviousSibling]: Node | null = null;
+    protected [symNextSibling]: Node | null = null;
 
     public get parentNode(): ParentNode | null {
         return this[symParent];
@@ -233,53 +277,154 @@ export abstract class Node {
     public get ownerDocument(): Document | null {
         return this[symDocument];
     }
+    public get isConnected(): boolean {
+        return (this instanceof Document) || Boolean(this[symParent]?.isConnected);
+    }
 
     protected constructor() {
-        if (this[symDocument] === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if ((this as any)[symDocument] === undefined) {
             throw new Error("a node must be created by a document");
         }
+    }
+
+    /**
+     * Looks up the namespace URI associated to the given prefix, starting from this node.
+     * 
+     * If the `prefix` parameter is `null` or an empty string, the method will return the default namespace URI if any.
+     * 
+     * @param {string | null} prefix the prefix to look for.
+     * @returns {string | null} the associated namespace URI or null if none is found.
+     */
+    public lookupNamespaceURI(prefix: string | null): string | null {
+        prefix = prefix || null;
+        const attr = prefix ? `xmlns:${prefix}` : "xmlns";
+        let p = this as Node;
+        while (p) {
+            const ty = p.nodeType;
+            if (ty == 9) {
+                const x = p as Document;
+                return x[symDefNs].get(prefix || "") || null;
+            }
+            if (ty == 10 || ty == 11) {
+                return this.ownerDocument?.[symDefNs].get(prefix || "") || null;
+            }
+            if (ty == 1) {
+                const elem = p as Element;
+                if (elem.prefix == prefix) {
+                    return elem.namespaceURI;
+                }
+                const a = elem.getAttribute(attr);
+                if (a) {
+                    return a;
+                }
+            }
+            p = p[symParent] as ParentNode;
+        }
+        return this.ownerDocument?.[symDefNs].get(prefix || "") || null;
+    }
+
+    /**
+     * Looks up the prefix associated to the given namespace URI, starting from this node.
+     * The default namespace declarations are ignored by this method.
+     * 
+     * @param {string | null} namespace the namespace URI to look for
+     * @returns {string | null} the associated prefix or null if none is found
+     */
+    public lookupPrefix(namespace: string | null): string | null {
+        if (!namespace) {
+            return null;
+        }
+        if (namespace == "http://www.w3.org/2000/xmlns/") {
+            return "xmlns";
+        }
+        if (namespace == "http://www.w3.org/XML/1998/namespace") {
+            return "xml";
+        }
+        
+        let p = this as Node;
+        while (p) {
+            const ty = this.nodeType;
+            if (ty == 10 || ty == 11) {
+                return null;
+            }
+            if (ty == 1) {
+                const elem = p as Element;
+                const ats = elem.attributes;
+                for (const at of ats) {
+                    if (at.namespaceURI == "http://www.w3.org/2000/xmlns/" && at.value == namespace) {
+                        return at.localName;
+                    }
+                }
+            }
+            p = p[symParent] as ParentNode;
+        }
+        return null;
     }
 
     public cloneNode(deep = false): Node {
         const base: Node = this.nodeType == 9 && this.constructor != this.ownerDocument?.Element
             ? new (this.constructor as new() => Element)()
             : Object.create(Object.getPrototypeOf(this), {
-                [symDocument]: { value: this[symDocument], writable: true },
-                [symParent]: { value: null, writable: true },
-                [symPreviousSibling]: { value: null, writable: true },
-                [symNextSibling]: { value: null, writable: true },
+                [symDocument]: { value: this[symDocument], writable: true, enumerable: false },
+                [symParent]: { value: null, writable: true, enumerable: false },
+                [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+                [symNextSibling]: { value: null, writable: true, enumerable: false },
             });
         
         {
             const tcont = (this as Node as Text)[symTextContent];
             if (typeof tcont != "undefined") {
-                Object.defineProperty(base, symTextContent, { value: tcont, writable: true });
+                Object.defineProperty(base, symTextContent, { value: tcont, writable: true, enumerable: false });
             }
         }
         {
             const tatt = (this as Node as Element)[symAttributes];
             if (typeof tatt != "undefined") {
-                Object.defineProperty(base, symAttributes, { value: new Map<string, string>(tatt), writable: true });
+                const cl: Map<string, Map<string, [string, string | null]>> = new Map();
+                for (const [ns, vs] of tatt) {
+                    if (!vs.size) {
+                        continue;
+                    }
+                    const cli: Map<string, [string, string | null]> = new Map();
+                    for (const [k, [v, p]] of vs) {
+                        cli.set(k, [v, p]);
+                    }
+                    cl.set(ns, cli);
+                }
+                Object.defineProperty(base, symAttributes, { value: cl, writable: true, enumerable: false });
             }
         }
         {
-            const tatt = (this as Node as Element)[symTagName];
-            if (!(base as Element)[symTagName] && typeof tatt != "undefined") {
-                Object.defineProperty(base, symTagName, { value: tatt, writable: true });
+            const tatt = (this as Node as Element)[symLocalName];
+            if (!(base as Element)[symLocalName] && typeof tatt != "undefined") {
+                Object.defineProperty(base, symLocalName, { value: tatt, writable: true, enumerable: false });
+            }
+        }
+        {
+            const tatt = (this as Node as Element)[symPrefix];
+            if (!(base as Element)[symPrefix] && typeof tatt != "undefined") {
+                Object.defineProperty(base, symPrefix, { value: tatt, writable: true, enumerable: false });
+            }
+        }
+        {
+            const tatt = (this as Node as Element)[symNsUri];
+            if (!(base as Element)[symNsUri] && typeof tatt != "undefined") {
+                Object.defineProperty(base, symNsUri, { value: tatt, writable: true, enumerable: false });
             }
         }
         {
             const tatt = (this as Node as ProcessingInstruction)[symTarget];
             if (!(base as ProcessingInstruction)[symTarget] && typeof tatt != "undefined") {
-                Object.defineProperty(base, symTarget, { value: tatt, writable: false });
+                Object.defineProperty(base, symTarget, { value: tatt, writable: false, enumerable: false });
             }
         }
         if (this.nodeType == 10) {
             const t = this as Node as DocumentType;
             Object.defineProperties(base, {
-                name: { value: t.name, writable: false },
-                publicId: { value: t.publicId, writable: false },
-                systemId: { value: t.systemId, writable: false },
+                name: { value: t.name, writable: false, enumerable: true },
+                publicId: { value: t.publicId, writable: false, enumerable: true },
+                systemId: { value: t.systemId, writable: false, enumerable: true },
             });
         }
         
@@ -296,7 +441,28 @@ export abstract class Node {
     }
 
     protected unsafeSetParent(parentNode: ParentNode | null) {
+        const prev = this[symParent];
         this[symParent] = parentNode;
+        const state = (this as unknown as Element)[symCustomElementState];
+        if (parentNode) {
+            parentNode.appendChild(this);
+        }
+        if (!state) {
+            return;
+        }
+        const elem = this as unknown as Element;
+        if (prev) {
+            if (!state[0]) {
+                state[1] = true;
+            }
+            state[0] = false;
+        }
+        if (parentNode && parentNode.isConnected) {
+            state[0] = true;
+        } else {
+            state[0] = false;
+        }
+        signalConnected(elem);
     }
     protected unsafeReplaceParent(parentNode: ParentNode | null) {
         const p = this[symParent];
@@ -322,8 +488,8 @@ export abstract class Node {
 const symChildNodes = Symbol("childNodes");
 const symChildren = Symbol("children");
 abstract class ParentNode extends Node {
-    [symChildNodes]?: Node[];
-    [symChildren]?: Element[];
+    private [symChildNodes]?: Node[];
+    private [symChildren]?: Element[];
 
     /** @type {string} */
     public get textContent() {
@@ -538,13 +704,13 @@ abstract class ParentNode extends Node {
                 a[symChildren] = [];
             }
         } else {
-            (a as Node as ParentNode).unsafeReplaceParent(this);
             (a as Node as ParentNode).unsafeSetPrev(childNodes[i - 1] || null);
             (a as Node as ParentNode).unsafeSetNext(childNodes[i] || null);
             childNodes.splice(i, 0, a);
             if (a.nodeType == 1) {
                 children.splice(j++, 0, a as Node as Element);
             }
+            (a as Node as ParentNode).unsafeReplaceParent(this);
         }
         return a;
     }
@@ -573,18 +739,22 @@ abstract class ParentNode extends Node {
         }
     }
 
-    public getElementsByClassName(cls: string) {
+    public getElementsByClassName(cls: string): ArrayLike<Element> & Iterable<Element> {
         return this.querySelectorAll("." + cls);
     }
 
-    public getElementsByTagName(tag: string) {
+    public getElementsByTagName(tag: string): ArrayLike<Element> & Iterable<Element> {
         return this.querySelectorAll(tag);
+    }
+
+    public getElementsByTagNameNS(ns: string | null, tag: string): ArrayLike<Element> & Iterable<Element> {
+        return Array.from(this.querySelectorAll(tag)).filter((e) => e.namespaceURI == ns);
     }
 }
 
 const symTextContent = Symbol("textContent");
 export abstract class CharacterData extends Node {
-    [symTextContent]: string;
+    private [symTextContent]: string;
 
     public get data() {
         return this[symTextContent];
@@ -641,7 +811,7 @@ export class CDATASection extends CharacterData {
 
 const symTarget = Symbol("target");
 export class ProcessingInstruction extends CharacterData {
-    [symTarget]: string;
+    private [symTarget]: string;
     get nodeType(): 7 {
         return 7;
     }
@@ -689,36 +859,56 @@ export class DocumentFragment extends ParentNode {
 }
 
 abstract class Attr extends Node {
+    public readonly namespaceURI!: string | null;
     public readonly ownerElement!: Element;
-    public readonly name!: string;
+    public readonly localName!: string;
+    public readonly prefix!: string | null;
     public readonly value!: string;
-    public get specified() {
+    public get specified(): boolean {
         return true;
     }
-    public get prefix() {
-        const m = this.name.match(/^([^:]+):/);
-        return m ? m[1] : null;
-    }
-    public get localName() {
-        return this.name.replace(/^[^:]+:/, "");
+    public get name(): string {
+        if (!this.prefix) {
+            return this.localName;
+        }
+        return `${this.prefix}:${this.localName}`;
     }
 }
 
 const symAttributes = Symbol("attributes");
 const symClassList = Symbol("classList");
 export abstract class Element extends ParentNode {
-    readonly [symTagName]!: string;
-    [symAttributes]?: Map<string, string>;
-    [symClassList]?: DOMTokenList;
+    protected readonly [symNsUri]!: string | null;
+    protected readonly [symLocalName]!: string;
+    protected readonly [symPrefix]!: string | null;
+    private [symAttributes]?: Map<string, Map<string, [string, string | null]>>;
+    private [symClassList]?: DOMTokenList;
+    private readonly [symIsCustomElement]?: true;
+    private readonly [symCustomElementState]?: [boolean, boolean, boolean];
 
     public get nodeType(): 1 {
         return 1;
     }
     public get tagName() {
-        return this[symTagName];
+        if (!this[symPrefix]) {
+            return this[symLocalName];
+        }
+        return `${this[symPrefix]}:${this[symLocalName]}`;
     }
     public get localName() {
-        return this[symTagName].replace(/^[^:]*:/, "");
+        return this[symLocalName];
+    }
+    public get prefix() {
+        return this[symPrefix];
+    }
+    public get namespaceURI() {
+        return this[symNsUri];
+    }
+    get [Symbol.toStringTag]() {
+        if (!this[symPrefix]) {
+            return this[symLocalName];
+        }
+        return `${this[symPrefix]}:${this[symLocalName]}`;
     }
 
     public get id() {
@@ -743,40 +933,130 @@ export abstract class Element extends ParentNode {
         if (!attrs) {
             return ret;
         }
-        for (const [k, v] of attrs) {
-            const attr = Object.create(Attr.prototype, {
-                [symDocument]: { value: this.ownerDocument, writable: true },
-                ownerElement: { value: this, writable: true },
-                name: { value: k, writable: false },
-                value: { value: v, writable: true },
-            });
-            // (Attr as new() => Attr).call(attr);
-            ret.push(attr);
+        for (const [ns, al] of attrs) {
+            for (const [k, [v, pfx]] of al) {
+                const attr = Object.create(Attr.prototype, {
+                    [symDocument]: { value: this.ownerDocument, writable: false, enumerable: false },
+                    namespaceURI: { value: ns, writable: false, enumerable: true },
+                    ownerElement: { value: this, writable: false, enumerable: true },
+                    localName: { value: k, writable: false, enumerable: true },
+                    value: { value: v, writable: false, enumerable: true },
+                    prefix: { value: pfx, writable: false, enumerable: true },
+                });
+                ret.push(attr);
+            }
         }
         return ret;
     }
 
     protected constructor() {
         super();
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        const t = this[symTagName];
+        const t = this[symLocalName];
         if (!t) {
             throw new Error("unexpected element without known tag name");
         }
+        if (this[symIsCustomElement]) {
+            this[symCustomElementState] = [false, false, false];
+        }
     }
+
+    public disconnectedCallback?(): void;
+    public connectedCallback?(): void;
 
     public getAttribute(att: string): string | null {
         const attrs = this[symAttributes];
-        const r = attrs ? attrs.get(att) : null;
-        return r === undefined ? null : r;
+        if (!attrs) {
+            return null;
+        }
+        const r = attrs.get("")?.get(att);
+        if (r !== undefined) {
+            return r[0];
+        }
+        // if not defined in the default namespace, check for namespaced
+        const p = att.indexOf(":");
+        const pfx = p !== -1 ? att.substring(0, p) : null;
+        const localName = p !== -1 ? att.substring(p + 1) : att;
+        for (const ats of attrs.values()) {
+            const r = ats.get(localName);
+            if (r !== undefined && r[1] === pfx) {
+                return r[0];
+            }
+        }
+        return null;
     }
-    public setAttribute(att: string, val: string) {
+    public getAttributeNS(ns: string | null, att: string): string | null {
+        if (ns === null) {
+            ns = "";
+        }
+        const attrs = this[symAttributes];
+        const r = attrs?.get(ns)?.get(att);
+        return r === undefined ? null : r[0];
+    }
+    public setAttribute(att: string, val: string): void {
         let attrs = this[symAttributes];
         if (!attrs) {
             attrs = new Map();
             this[symAttributes] = attrs;
         }
-        attrs.set(att, val);
+        let attrs2 = attrs.get("");
+        if (!attrs2) {
+            attrs2 = new Map();
+            attrs.set("", attrs2);
+        }
+        attrs2.set(att, [val, null]);
+    }
+    public setAttributeNS(ns: string | null, att: string, val: string): void {
+        if (ns === null) {
+            ns = "";
+        }
+        let attrs = this[symAttributes];
+        if (!attrs) {
+            attrs = new Map();
+            this[symAttributes] = attrs;
+        }
+        let attrs2 = attrs.get(ns);
+        if (!attrs2) {
+            attrs2 = new Map();
+            attrs.set(ns, attrs2);
+        }
+        const p = att.indexOf(":");
+        const pfx = p !== -1 ? att.substring(0, p) : null;
+        const localName = p !== -1 ? att.substring(p + 1) : att;
+        // at least in chrome, the prefix is never redefined if it is already there
+        const item = attrs2.get(localName);
+        if (!item) {
+            attrs2.set(localName, [val, pfx]);
+        } else {
+            item[0] = val;
+        }
+    }
+    public removeAttribute(att: string): void {
+        const attrs = this[symAttributes];
+        if (!attrs) {
+            return;
+        }
+        const r = attrs.get("")?.delete(att);
+        if (r) {
+            return;
+        }
+        // if not defined in the default namespace, check for namespaced
+        const p = att.indexOf(":");
+        const pfx = p !== -1 ? att.substring(0, p) : null;
+        const localName = p !== -1 ? att.substring(p + 1) : att;
+        for (const ats of attrs.values()) {
+            const r = ats.get(localName);
+            if (r !== undefined && r[1] === pfx) {
+                ats.delete(localName);
+                return;
+            }
+        }
+    }
+    public removeAttributeNS(ns: string | null, att: string): void {
+        if (ns === null) {
+            ns = "";
+        }
+        const attrs = this[symAttributes];
+        attrs?.get(ns)?.delete(att);
     }
     public remove() {
         const p = this.parentNode;
@@ -795,20 +1075,30 @@ function docInit(doc: Document) {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     Object.defineProperties(doc[symElement].prototype, {
-        [symDocument]: { value: doc, writable: true },
-        [symParent]: { value: null, writable: true },
-        [symPreviousSibling]: { value: null, writable: true },
-        [symNextSibling]: { value: null, writable: true },
+        [symDocument]: { value: doc, writable: true, enumerable: false },
+        [symParent]: { value: null, writable: true, enumerable: false },
+        [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+        [symNextSibling]: { value: null, writable: true, enumerable: false },
     });
     return doc;
 }
 
+const symDefNs = Symbol("defNs");
+const defNs: [string, string][] = [
+    ["xmlns", "http://www.w3.org/2000/xmlns/"],
+    ["xml", "http://www.w3.org/XML/1998/namespace"],
+];
 export abstract class Document extends ParentNode {
-    [symElement]: new() => Element;
-    [symCustomElements]?: CustomElementRegistry;
+    private [symElement]!: new() => Element;
+    private [symCustomElements]?: CustomElementRegistry;
+    protected [symDefNs]!: Map<string, string>;
 
     public get Element() {
         return this[symElement];
+    }
+    
+    public get isConnected(): boolean {
+        return true;
     }
 
     public get customElements() {
@@ -832,57 +1122,76 @@ export abstract class Document extends ParentNode {
     }
 
     public createElement(tagName: string): Element {
+        const ns = this[symDefNs]?.get("") || null;
         const cons = this[symCustomElements]?.get(tagName);
         if (cons) {
             return new cons();
         }
+        if (ns && ns === "http://www.w3.org/1999/xhtml") {
+            tagName = tagName.toLowerCase();
+        }
         return Object.create(this[symElement].prototype, {
-            [symTagName]: { value: tagName, writable: false },
+            [symLocalName]: { value: tagName, writable: false, enumerable: false },
+            [symPrefix]: { value: null, writable: false, enumerable: false },
+            [symNsUri]: { value: ns, writable: false, enumerable: true },
+        });
+    }
+    public createElementNS(ns: string | null, qName: string): Element {
+        if (!ns) {
+            return this.createElement(qName);
+        }
+        const p = qName.indexOf(":");
+        const pfx = p !== -1 ? qName.substring(0, p) : null;
+        const localName = p !== -1 ? qName.substring(p + 1) : qName;
+        return Object.create(this[symElement].prototype, {
+            [symLocalName]: { value: localName, writable: false, enumerable: false },
+            [symPrefix]: { value: pfx, writable: false, enumerable: false },
+            [symNsUri]: { value: ns, writable: false, enumerable: true },
         });
     }
     public createTextNode(text: string): Text {
         return Object.create(Text.prototype, {
-            [symDocument]: { value: this, writable: true },
-            [symParent]: { value: null, writable: true },
-            [symPreviousSibling]: { value: null, writable: true },
-            [symNextSibling]: { value: null, writable: true },
-            [symTextContent]: { value: text.toString(), writable: true },
+            [symDocument]: { value: this, writable: true, enumerable: false },
+            [symParent]: { value: null, writable: true, enumerable: false },
+            [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+            [symNextSibling]: { value: null, writable: true, enumerable: false },
+            [symTextContent]: { value: text.toString(), writable: true, enumerable: false },
         });
     }
     public createComment(data: string): Comment {
         return Object.create(Comment.prototype, {
-            [symDocument]: { value: this, writable: true },
-            [symParent]: { value: null, writable: true },
-            [symPreviousSibling]: { value: null, writable: true },
-            [symNextSibling]: { value: null, writable: true },
-            [symTextContent]: { value: data.toString(), writable: true },
+            [symDocument]: { value: this, writable: true, enumerable: false },
+            [symParent]: { value: null, writable: true, enumerable: false },
+            [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+            [symNextSibling]: { value: null, writable: true, enumerable: false },
+            [symTextContent]: { value: data.toString(), writable: true, enumerable: false },
         });
     }
     public createCDATASection(data: string): CDATASection {
         return Object.create(CDATASection.prototype, {
-            [symDocument]: { value: this, writable: true },
-            [symParent]: { value: null, writable: true },
-            [symPreviousSibling]: { value: null, writable: true },
-            [symNextSibling]: { value: null, writable: true },
-            [symTextContent]: { value: data.toString(), writable: true },
+            [symDocument]: { value: this, writable: true, enumerable: false },
+            [symParent]: { value: null, writable: true, enumerable: false },
+            [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+            [symNextSibling]: { value: null, writable: true, enumerable: false },
+            [symTextContent]: { value: data.toString(), writable: true, enumerable: false },
         });
     }
     public createProcessingInstruction(target: string, data: string): ProcessingInstruction {
         return Object.create(ProcessingInstruction.prototype, {
-            [symDocument]: { value: this, writable: true },
-            [symParent]: { value: null, writable: true },
-            [symPreviousSibling]: { value: null, writable: true },
-            [symNextSibling]: { value: null, writable: true },
-            [symTarget]: { value: target.toString(), writable: true },
-            [symTextContent]: { value: data.toString(), writable: true },
+            [symDocument]: { value: this, writable: true, enumerable: false },
+            [symParent]: { value: null, writable: true, enumerable: false },
+            [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+            [symNextSibling]: { value: null, writable: true, enumerable: false },
+            [symTarget]: { value: target.toString(), writable: true, enumerable: false },
+            [symTextContent]: { value: data.toString(), writable: true, enumerable: false },
         });
     }
     public createDocumentFragment(): DocumentFragment {
         return Object.create(DocumentFragment.prototype, {
-            [symDocument]: { value: this, writable: true },
-            [symParent]: { value: null, writable: false },
-            [symPreviousSibling]: { value: null, writable: false },
-            [symNextSibling]: { value: null, writable: false },
+            [symDocument]: { value: this, writable: true, enumerable: false },
+            [symParent]: { value: null, writable: false, enumerable: false },
+            [symPreviousSibling]: { value: null, writable: false, enumerable: false },
+            [symNextSibling]: { value: null, writable: false, enumerable: false },
         });
     }
 
@@ -897,7 +1206,10 @@ export function createDocument(): Document {
             super();
         }
     }
-    return docInit(Object.create(DOMDocument.prototype, { [symDocument]: { value: null }}));
+    return docInit(Object.create(DOMDocument.prototype, {
+        [symDocument]: { value: null, writable: true, enumerable: false },
+        [symDefNs]: { value: new Map(defNs), writable: true, enumerable: false },
+    }));
 }
 
 export function createHTMLDocument(docTitle = ""): Document {
@@ -924,9 +1236,11 @@ export function createHTMLDocument(docTitle = ""): Document {
             super();
         }
     }
-    const doc = Object.create(HTMLDocument.prototype) as HTMLDocument;
+    const doc = Object.create(HTMLDocument.prototype, {
+        [symDocument]: { value: null, writable: true, enumerable: false },
+        [symDefNs]: { value: new Map([...defNs, ["", "http://www.w3.org/1999/xhtml"]]), writable: true, enumerable: false },
+    }) as HTMLDocument;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (doc as any)[symDocument] = null;
     docInit(doc);
     Object.defineProperty(doc.Element.prototype, "className", {
         get() { return this.getAttribute("class") || ""; },
@@ -968,12 +1282,12 @@ export class DocumentType extends Node {
 }
 export function createDocumentType(qualifiedNameStr: string, publicId = "", systemId = ""): DocumentType {
     return Object.create(DocumentType.prototype, {
-        [symDocument]: { value: null, writable: true },
+        [symDocument]: { value: null, writable: true, enumerable: false },
         name: { value: qualifiedNameStr, writable: false },
         publicId: { value: publicId, writable: false },
         systemId: { value: systemId, writable: false },
-        [symParent]: { value: null, writable: true },
-        [symPreviousSibling]: { value: null, writable: true },
-        [symNextSibling]: { value: null, writable: true },
+        [symParent]: { value: null, writable: true, enumerable: false },
+        [symPreviousSibling]: { value: null, writable: true, enumerable: false },
+        [symNextSibling]: { value: null, writable: true, enumerable: false },
     });
 }

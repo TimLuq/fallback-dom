@@ -1,19 +1,21 @@
-declare const symDefinedTag: unique symbol;
 declare const symCustomElements: unique symbol;
 declare const symDocument: unique symbol;
-declare const symTagName: unique symbol;
 declare const symRegReg: unique symbol;
 declare const symRegCon: unique symbol;
 declare const symRegWhen: unique symbol;
+declare const symLocalName: unique symbol;
+declare const symPrefix: unique symbol;
+declare const symNsUri: unique symbol;
+declare const symIsCustomElement: unique symbol;
+declare const symCustomElementState: unique symbol;
 declare class CustomElementRegistry {
-    readonly [symRegReg]: Map<string, new () => Element>;
-    readonly [symRegCon]: Map<Function, string>;
-    readonly [symRegWhen]: Map<string, ((a: new () => Element) => void)[]>;
+    private readonly [symRegReg];
+    private readonly [symRegCon];
+    private readonly [symRegWhen];
     define(name: string, constructor: new () => Element): void;
     upgrade(root: Element): void;
     whenDefined(name: string): Promise<new () => Element>;
     get(name: string): (new () => Element) | undefined;
-    [symDefinedTag](cons: Function): string | undefined;
 }
 declare class DOMTokenList {
     private readonly _split;
@@ -41,15 +43,33 @@ declare const symNextSibling: unique symbol;
 export declare abstract class Node {
     abstract readonly nodeType: number;
     abstract readonly textContent: string;
-    readonly [symDocument]: Document | null;
-    [symParent]: ParentNode | null;
-    [symPreviousSibling]: Node | null;
-    [symNextSibling]: Node | null;
+    protected readonly [symDocument]: Document | null;
+    protected [symParent]: ParentNode | null;
+    protected [symPreviousSibling]: Node | null;
+    protected [symNextSibling]: Node | null;
     get parentNode(): ParentNode | null;
     get previousSibling(): Node | null;
     get nextSibling(): Node | null;
     get ownerDocument(): Document | null;
+    get isConnected(): boolean;
     protected constructor();
+    /**
+     * Looks up the namespace URI associated to the given prefix, starting from this node.
+     *
+     * If the `prefix` parameter is `null` or an empty string, the method will return the default namespace URI if any.
+     *
+     * @param {string | null} prefix the prefix to look for.
+     * @returns {string | null} the associated namespace URI or null if none is found.
+     */
+    lookupNamespaceURI(prefix: string | null): string | null;
+    /**
+     * Looks up the prefix associated to the given namespace URI, starting from this node.
+     * The default namespace declarations are ignored by this method.
+     *
+     * @param {string | null} namespace the namespace URI to look for
+     * @returns {string | null} the associated prefix or null if none is found
+     */
+    lookupPrefix(namespace: string | null): string | null;
     cloneNode(deep?: boolean): Node;
     protected unsafeSetParent(parentNode: ParentNode | null): void;
     protected unsafeReplaceParent(parentNode: ParentNode | null): void;
@@ -59,8 +79,8 @@ export declare abstract class Node {
 declare const symChildNodes: unique symbol;
 declare const symChildren: unique symbol;
 declare abstract class ParentNode extends Node {
-    [symChildNodes]?: Node[];
-    [symChildren]?: Element[];
+    private [symChildNodes]?;
+    private [symChildren]?;
     /** @type {string} */
     get textContent(): string;
     set textContent(content: string);
@@ -84,10 +104,11 @@ declare abstract class ParentNode extends Node {
     removeChild<T extends Node>(a: T): T;
     getElementsByClassName(cls: string): ArrayLike<Element> & Iterable<Element>;
     getElementsByTagName(tag: string): ArrayLike<Element> & Iterable<Element>;
+    getElementsByTagNameNS(ns: string | null, tag: string): ArrayLike<Element> & Iterable<Element>;
 }
 declare const symTextContent: unique symbol;
 export declare abstract class CharacterData extends Node {
-    [symTextContent]: string;
+    private [symTextContent];
     get data(): string;
     set data(content: string);
     get length(): number;
@@ -108,7 +129,7 @@ export declare class CDATASection extends CharacterData {
 }
 declare const symTarget: unique symbol;
 export declare class ProcessingInstruction extends CharacterData {
-    [symTarget]: string;
+    private [symTarget];
     get nodeType(): 7;
     get target(): string;
     get textContent(): string;
@@ -126,41 +147,59 @@ export declare class DocumentFragment extends ParentNode {
     protected constructor();
 }
 declare abstract class Attr extends Node {
+    readonly namespaceURI: string | null;
     readonly ownerElement: Element;
-    readonly name: string;
+    readonly localName: string;
+    readonly prefix: string | null;
     readonly value: string;
     get specified(): boolean;
-    get prefix(): string | null;
-    get localName(): string;
+    get name(): string;
 }
 declare const symAttributes: unique symbol;
 declare const symClassList: unique symbol;
 export declare abstract class Element extends ParentNode {
-    readonly [symTagName]: string;
-    [symAttributes]?: Map<string, string>;
-    [symClassList]?: DOMTokenList;
+    protected readonly [symNsUri]: string | null;
+    protected readonly [symLocalName]: string;
+    protected readonly [symPrefix]: string | null;
+    private [symAttributes]?;
+    private [symClassList]?;
+    private readonly [symIsCustomElement]?;
+    private readonly [symCustomElementState]?;
     get nodeType(): 1;
     get tagName(): string;
     get localName(): string;
+    get prefix(): string | null;
+    get namespaceURI(): string | null;
+    get [Symbol.toStringTag](): string;
     get id(): string;
     set id(id: string);
     get classList(): DOMTokenList;
     get attributes(): ArrayLike<Attr> & Iterable<Attr>;
     protected constructor();
+    disconnectedCallback?(): void;
+    connectedCallback?(): void;
     getAttribute(att: string): string | null;
+    getAttributeNS(ns: string | null, att: string): string | null;
     setAttribute(att: string, val: string): void;
+    setAttributeNS(ns: string | null, att: string, val: string): void;
+    removeAttribute(att: string): void;
+    removeAttributeNS(ns: string | null, att: string): void;
     remove(): void;
 }
 declare const symElement: unique symbol;
+declare const symDefNs: unique symbol;
 export declare abstract class Document extends ParentNode {
-    [symElement]: new () => Element;
-    [symCustomElements]?: CustomElementRegistry;
+    private [symElement];
+    private [symCustomElements]?;
+    protected [symDefNs]: Map<string, string>;
     get Element(): new () => Element;
+    get isConnected(): boolean;
     get customElements(): CustomElementRegistry;
     get nodeType(): 9;
     get documentElement(): Element | null;
     protected constructor();
     createElement(tagName: string): Element;
+    createElementNS(ns: string | null, qName: string): Element;
     createTextNode(text: string): Text;
     createComment(data: string): Comment;
     createCDATASection(data: string): CDATASection;

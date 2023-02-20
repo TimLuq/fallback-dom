@@ -1,8 +1,8 @@
-import { terser } from "rollup-plugin-terser";
+import terser from "@rollup/plugin-terser";
 import typescript from "@rollup/plugin-typescript";
 import summary from "rollup-plugin-summary";
 
-/** @type {import("rollup-plugin-terser").Options} */
+/** @type {import("@rollup/plugin-terser").Options} */
 const terserOptions = {
     warnings: true,
     ecma: 2020,
