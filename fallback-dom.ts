@@ -752,6 +752,10 @@ abstract class ParentNode extends Node {
         return Array.from(this.querySelectorAll(tag)).filter((e) => e.namespaceURI == ns);
     }
 }
+Object.defineProperties(ParentNode.prototype, {
+    [symChildNodes]: { enumerable: false, writable: true },
+    [symChildren]: { enumerable: false, writable: true },
+});
 
 const symTextContent = Symbol("textContent");
 export abstract class CharacterData extends Node {
